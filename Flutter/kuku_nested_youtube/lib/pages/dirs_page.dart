@@ -30,15 +30,7 @@ class _PageDirsState extends State<PageDirs> {
   }
 
   void _loadDirectories() {
-    _dirsFuture = HiveDB.instance.getDirectories().then((allDirs) {
-      if (_currentDirID == -1) {
-        return allDirs.where((dir) => dir.parentDirID == -1).toList();
-      } else {
-        return allDirs
-            .where((dir) => dir.parentDirID == _currentDirID)
-            .toList();
-      }
-    });
+    _dirsFuture = HiveDB.instance.getDirectories(parentDirID: _currentDirID);
   }
 
   void _loadVideos() {
@@ -105,9 +97,24 @@ class _PageDirsState extends State<PageDirs> {
                             onTap: () => _navigateToDirectory(dir.id),
                           )),
                       ...vids.map((vid) => ListTile(
-                            leading: const Icon(Icons.video_library),
-                            title: Text(vid.link),
-                            subtitle: Text(vid.desc),
+                            leading: Image.network(
+                              vid.thumbnailUrl,
+                              width: 50,
+                              height: 50,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) =>
+                                  const Icon(Icons.error),
+                            ),
+                            title: Text(vid.title),
+                            subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(vid.desc),
+                                Text('Video ID: ${vid.videoID}',
+                                    style: const TextStyle(fontSize: 12)),
+                              ],
+                            ),
+                            isThreeLine: true,
                             onTap: () {
                               // Implement video playback or details view
                             },

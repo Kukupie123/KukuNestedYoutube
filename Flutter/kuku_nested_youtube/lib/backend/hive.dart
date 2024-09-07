@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:developer';
 
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:youtube_video_info/youtube.dart';
 
 import 'dto/dir_model.dart';
 import 'dto/vid_model.dart';
@@ -40,70 +41,54 @@ class HiveDB {
     await dirDB.put(id, map);
   }
 
-  Future<List<DirModel>> getDirectories() async {
+  Future<List<DirModel>> getDirectories({int? parentDirID}) async {
     List<DirModel> dirList = [];
 
     final futures = dirDB.keys.map((k) async {
       final value = await dirDB.get(k);
-
-      // Ensure proper casting/parsing of data
-      final parentID = value["parentID"] as int;
-      final name = value["name"] as String;
-
-      // Parse datetime strings into DateTime objects
-      final createdString = value["created"] as String;
-      final updatedString = value["updated"] as String;
-      final created = DateTime.tryParse(createdString) ?? DateTime.now();
-      final updated = DateTime.tryParse(updatedString) ?? DateTime.now();
-
-      final desc = value["desc"] as String;
-
-      return DirModel(
-        id: k as int,
-        parentDirID: parentID,
-        name: name,
-        created: created,
-        updated: updated,
-        desc: desc,
-      );
+      return DirModel.fromMap(k as int, value);
     }).toList();
 
     dirList = await Future.wait(futures);
+    // Filter the directories if parentDirID is provided
+    if (parentDirID != null) {
+      dirList = dirList.where((dir) => dir.parentDirID == parentDirID).toList();
+    }
     return dirList;
   }
 
   // Add a new video in the specified directory.
-  Future<void> addVid(
-      {required String link, required int dirID, String desc = ""}) async {
+  Future<void> addVid({
+    required String link,
+    required int dirID,
+    String desc = "",
+  }) async {
     String? videoID;
 
     if (!dirDB.keys.contains(dirID)) {
       throw Exception("Invalid dirID. It doesn't exist");
     }
 
-    // Regular expression to extract video ID from full YouTube link
+    // Extract video ID (unchanged)
     final fullUrlRegex = RegExp(r'v=([a-zA-Z0-9_-]{11})');
     final fullUrlMatch = fullUrlRegex.firstMatch(link);
 
     if (fullUrlMatch != null) {
-      videoID = fullUrlMatch.group(1); // Extract from full YouTube URL
+      videoID = fullUrlMatch.group(1);
     } else {
-      // Try to extract video ID from shortened youtu.be link
       final shortUrlRegex = RegExp(r'youtu\.be/([a-zA-Z0-9_-]{11})');
       final shortUrlMatch = shortUrlRegex.firstMatch(link);
 
       if (shortUrlMatch != null) {
         videoID = shortUrlMatch.group(1);
       } else {
-        // Check if the link itself is a valid video ID (11 characters)
         final idRegex = RegExp(r'^[a-zA-Z0-9_-]{11}$');
         if (idRegex.hasMatch(link)) {
-          videoID = link; // The link is already a valid video ID
+          videoID = link;
         }
       }
     }
 
-    // Throw an exception if the video ID is not found
     if (videoID == null) {
       throw Exception(
           'Invalid YouTube URL or video ID: Unable to extract video ID');
@@ -111,19 +96,27 @@ class HiveDB {
 
     log("Video ID $videoID");
 
+    // Fetch video details using youtube_explode_dart
+    var yt = await YoutubeData.getData(link);
+
+    var thumb = yt.thumbnailUrl;
+    var title = yt.title;
+    log("Title is $title");
+    log("Title : $title");
     final map = {
       "desc": desc,
       "created": DateTime.now().toString(),
       "updated": DateTime.now().toString(),
       "link": link,
+      "title": title,
+      "thumbnailUrl": thumb,
     };
 
     log("Adding Video ${jsonEncode(map)} with videoID: $videoID");
 
     await vidDB.put(videoID, map);
 
-    //Add the relationship of dirID and videoID;
-    log("Adding Video $videoID tod Dir: $dirID");
+    log("Adding Video $videoID to Dir: $dirID");
     await dirVidDB.put("$dirID;$videoID", "");
   }
 
@@ -135,7 +128,8 @@ class HiveDB {
       final allKeys = vidDB.keys.toList();
       final futures = allKeys.map((videoID) async {
         final value = await vidDB.get(videoID);
-        return _parseVidModel(videoID, value);
+        return VidModel.fromMap(
+            videoID as String, value as Map<String, dynamic>);
       }).toList();
       videoList = await Future.wait(futures);
     } else {
@@ -145,28 +139,11 @@ class HiveDB {
       final futures = dirVidKeys.map((key) async {
         final videoID = key.split(';')[1]; // Extract videoID from key
         final value = await vidDB.get(videoID);
-        return _parseVidModel(videoID, value);
+        return VidModel.fromMap(videoID, value as Map<String, dynamic>);
       }).toList();
       videoList = await Future.wait(futures);
     }
 
     return videoList;
-  }
-
-  VidModel _parseVidModel(String videoID, dynamic value) {
-    final createdStr = value["created"] as String;
-    final updatedStr = value["updated"] as String;
-
-    // Parse the date strings into DateTime objects
-    final created = DateTime.tryParse(createdStr) ?? DateTime.now();
-    final updated = DateTime.tryParse(updatedStr) ?? DateTime.now();
-
-    return VidModel(
-      videoID: videoID,
-      link: value["link"] as String,
-      desc: value["desc"] as String,
-      created: created,
-      updated: updated,
-    );
   }
 }
